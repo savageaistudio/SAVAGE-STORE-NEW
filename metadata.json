@@ -1,0 +1,6 @@
+{
+  "name": "SAVAGE STORE - Premium Apparel & Custom Merch",
+  "description": "Premium Bangladeshi streetwear & clothing e-commerce store with live product mockup customizer, real-time inventory, and administrative management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

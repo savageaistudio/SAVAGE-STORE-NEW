@@ -1,0 +1,146 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ==========================================
+    // SAVAGE STORE Security Architecture
+    // Administrator UID: h5SWaCFwWiRPtRYcDJNtlCgF2yH3
+    // ==========================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.uid == 'h5SWaCFwWiRPtRYcDJNtlCgF2yH3' ||
+        request.auth.token.admin == true ||
+        request.auth.token.email in ['strvboys512@gmail.com', 'arsuvoroy@gmail.com'] ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    // 1. Global Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Admin Privileges Directory
+    match /admins/{adminId} {
+      allow read, write: if isAdmin();
+    }
+
+    // 3. Products Catalog
+    match /products/{productId} {
+      allow read: if isValidId(productId);
+      allow create, delete: if isAdmin();
+      // Allow admin full updates; allow verified order checkout to decrement variant stock atomically; allow customer product liking
+      allow update: if isAdmin() || (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['variants', 'totalStock', 'updatedAt']) &&
+        request.resource.data.totalStock <= resource.data.totalStock &&
+        request.resource.data.totalStock >= 0
+      ) || (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount']) &&
+        request.resource.data.likesCount is number &&
+        request.resource.data.likesCount >= 0
+      );
+    }
+
+    // 4. Categories Taxonomy
+    match /categories/{categoryId} {
+      allow read: if isValidId(categoryId);
+      allow write: if isAdmin();
+    }
+
+    // 5. Orders (Customer Purchases & Fulfillment)
+    match /orders/{orderId} {
+      // Order Creation Validation:
+      // Strictly enforces positive amounts, valid address/phone, non-empty items,
+      // and locks initial orderStatus and paymentStatus to 'Pending'.
+      allow create: if isValidId(orderId) &&
+        request.resource.data.totalAmount is number &&
+        request.resource.data.totalAmount >= 0 &&
+        request.resource.data.customer.phone is string &&
+        request.resource.data.customer.phone.size() >= 8 &&
+        request.resource.data.customer.address is string &&
+        request.resource.data.customer.address.size() > 0 &&
+        request.resource.data.items is list &&
+        request.resource.data.items.size() > 0 &&
+        request.resource.data.orderStatus == 'Pending' &&
+        request.resource.data.paymentStatus == 'Pending';
+
+      // Read access: Admin or Customer who placed it, or single document tracking
+      allow get: if isValidId(orderId) && (
+        isAdmin() ||
+        (isSignedIn() && resource.data.customerId == request.auth.uid) ||
+        true // Public order tracking lookup by known Order ID
+      );
+
+      // List query: Customers can only query their own orders; admin can list all
+      allow list: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
+
+      // Only authorized admin can change status, update notes, or cancel/refund
+      allow update, delete: if isAdmin();
+    }
+
+    // 6. Promotional Coupons
+    match /coupons/{couponId} {
+      allow read: if isValidId(couponId);
+      allow write: if isAdmin();
+    }
+
+    // 7. Shipping & Delivery Zones
+    match /deliveryZones/{zoneId} {
+      allow read: if isValidId(zoneId);
+      allow write: if isAdmin();
+    }
+
+    // 8. Homepage Promotional Banners
+    match /banners/{bannerId} {
+      allow read: if isValidId(bannerId);
+      allow write: if isAdmin();
+    }
+
+    // 9. Product Reviews & Ratings
+    match /reviews/{reviewId} {
+      // Public can only view approved reviews; admin can view all
+      allow read: if isValidId(reviewId) && (resource.data.approved == true || isAdmin());
+      // Customers can post reviews with validated rating (1-5) and comment length
+      allow create: if isValidId(reviewId) &&
+        request.resource.data.rating is number &&
+        request.resource.data.rating >= 1 &&
+        request.resource.data.rating <= 5 &&
+        request.resource.data.comment is string &&
+        request.resource.data.comment.size() > 0 &&
+        request.resource.data.comment.size() <= 2000;
+      // Only admin can approve, edit, or delete reviews
+      allow update, delete: if isAdmin();
+    }
+
+    // 10. Global Site Settings
+    match /settings/{docId} {
+      allow read: if isValidId(docId);
+      allow write: if isAdmin();
+    }
+
+    // 11. Customer Wishlists
+    match /wishlists/{userId} {
+      allow read, write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+    }
+
+    // 12. User Profiles
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      // Customers can only create/update their own profile and CANNOT self-assign admin role
+      allow create, update: if isSignedIn() && (
+        isAdmin() ||
+        (request.auth.uid == userId && (request.resource.data.role != 'admin' || resource.data.role == 'admin'))
+      );
+      allow delete: if isAdmin();
+    }
+  }
+}

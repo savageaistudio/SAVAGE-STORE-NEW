@@ -1,0 +1,55 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.uid == 'h5SWaCFwWiRPtRYcDJNtlCgF2yH3' ||
+        request.auth.token.admin == true ||
+        (request.auth.token.email == 'strvboys512@gmail.com' && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isImageUnder5MB() {
+      return request.resource.contentType.matches('image/.*') &&
+        request.resource.size < 5 * 1024 * 1024;
+    }
+
+    // Default Deny
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // Product Images (Public Read, Admin Write)
+    match /products/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin() && isImageUnder5MB();
+      allow delete: if isAdmin();
+    }
+
+    // Category Images (Public Read, Admin Write)
+    match /categories/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin() && isImageUnder5MB();
+      allow delete: if isAdmin();
+    }
+
+    // Homepage Banners (Public Read, Admin Write)
+    match /banners/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin() && isImageUnder5MB();
+      allow delete: if isAdmin();
+    }
+
+    // Customer Private Uploads & Custom Mockups (Owner access)
+    match /users/{userId}/{allPaths=**} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if isSignedIn() && request.auth.uid == userId && isImageUnder5MB();
+      allow delete: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+    }
+  }
+}
